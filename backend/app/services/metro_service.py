@@ -1,3 +1,5 @@
+import json
+
 from app.db import connect
 from app.engines.route_quote import quote_route
 from app.repositories import edges as edges_repo
@@ -5,6 +7,17 @@ from app.repositories import fare_rules as rules_repo
 from app.repositories import runs as runs_repo
 from app.repositories import settings as settings_repo
 from app.repositories import stations as stations_repo
+
+
+def _parse_run(row: dict) -> dict:
+    """A stored run is a locked snapshot: served verbatim, never recomputed."""
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "input": json.loads(row["input_json"]),
+        "result": json.loads(row["result_json"]),
+        "created_at": row["created_at"],
+    }
 
 
 class MetroService:
@@ -29,23 +42,47 @@ class MetroService:
     def edges(self):
         return [{"a": a, "b": b} for a, b in edges_repo.list_pairs(self._conn)]
 
+    def add_edge(self, a: str, b: str) -> bool:
+        return edges_repo.add_pair(self._conn, a, b)
+
+    def remove_edge(self, a: str, b: str) -> bool:
+        return edges_repo.delete_pair(self._conn, a, b)
+
     def fare_rules(self):
         return rules_repo.list_ordered(self._conn)
+
+    def add_fare_rule(self, max_hops: int | None, price: float) -> int:
+        return rules_repo.insert(self._conn, max_hops, price)
+
+    def update_fare_rule(self, rule_id: int, max_hops: int | None, price: float) -> bool:
+        return rules_repo.update(self._conn, rule_id, max_hops, price)
+
+    def delete_fare_rule(self, rule_id: int) -> bool:
+        return rules_repo.delete(self._conn, rule_id)
 
     def settings(self):
         return settings_repo.get_map(self._conn)
 
     def quote(self, start: str, end: str, persist: bool):
+        # Always computed against the CURRENT graph and fare table.
         edges = edges_repo.list_pairs(self._conn)
         rules = rules_repo.as_calc_rules(self._conn)
         result = quote_route(edges, start, end, rules)
         run_id = None
         if persist and result.get("reachable"):
+            # Writing the record locks the via-station path, hops and fare into the snapshot.
             run_id = runs_repo.insert(self._conn, "quote", {"start": start, "end": end}, result)
         return {"run_id": run_id, **result}
 
     def history(self, limit=50):
-        return runs_repo.list_recent(self._conn, limit)
+        return [_parse_run(r) for r in runs_repo.list_recent(self._conn, limit)]
+
+    def history_item(self, run_id: int):
+        row = runs_repo.get_by_id(self._conn, run_id)
+        return _parse_run(row) if row else None
+
+    def delete_run(self, run_id: int) -> bool:
+        return runs_repo.delete_by_id(self._conn, run_id)
 
     def dashboard(self):
         st = stations_repo.list_all(self._conn)
