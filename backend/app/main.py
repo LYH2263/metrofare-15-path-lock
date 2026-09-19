@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import seed
 from app.routers import api
 
-app = FastAPI(title="Metrofare", version="0.2.0")
+app = FastAPI(title="Metrofare", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("startup")

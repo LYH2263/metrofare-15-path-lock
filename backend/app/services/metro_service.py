@@ -1,3 +1,5 @@
+import json
+
 from app.db import connect
 from app.engines.route_quote import quote_route
 from app.repositories import edges as edges_repo
@@ -5,6 +7,23 @@ from app.repositories import fare_rules as rules_repo
 from app.repositories import runs as runs_repo
 from app.repositories import settings as settings_repo
 from app.repositories import stations as stations_repo
+
+
+def _parse_run(row: dict) -> dict:
+    """Shape a calc_runs row as the locked snapshot it stored at write time."""
+    payload = json.loads(row["input_json"])
+    result = json.loads(row["result_json"])
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "created_at": row["created_at"],
+        "start": payload.get("start"),
+        "end": payload.get("end"),
+        "hops": result.get("hops"),
+        "fare": result.get("fare"),
+        "path": result.get("path"),
+        "reachable": result.get("reachable"),
+    }
 
 
 class MetroService:
@@ -29,8 +48,17 @@ class MetroService:
     def edges(self):
         return [{"a": a, "b": b} for a, b in edges_repo.list_pairs(self._conn)]
 
+    def add_edge(self, a: str, b: str):
+        edges_repo.add_pair(self._conn, a, b)
+
+    def remove_edge(self, a: str, b: str) -> bool:
+        return edges_repo.remove_pair(self._conn, a, b)
+
     def fare_rules(self):
         return rules_repo.list_ordered(self._conn)
+
+    def update_fare_rule(self, rule_id: int, max_hops: int | None, price: float) -> bool:
+        return rules_repo.update(self._conn, rule_id, max_hops, price)
 
     def settings(self):
         return settings_repo.get_map(self._conn)
@@ -45,7 +73,14 @@ class MetroService:
         return {"run_id": run_id, **result}
 
     def history(self, limit=50):
-        return runs_repo.list_recent(self._conn, limit)
+        return [_parse_run(r) for r in runs_repo.list_recent(self._conn, limit)]
+
+    def run_detail(self, run_id: int):
+        row = runs_repo.get_by_id(self._conn, run_id)
+        return _parse_run(row) if row else None
+
+    def delete_run(self, run_id: int) -> bool:
+        return runs_repo.delete_by_id(self._conn, run_id)
 
     def dashboard(self):
         st = stations_repo.list_all(self._conn)

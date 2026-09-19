@@ -8,3 +8,11 @@ def list_ordered(conn: sqlite3.Connection) -> list[dict]:
 
 def as_calc_rules(conn: sqlite3.Connection) -> list[dict]:
     return [{"max_hops": r["max_hops"], "price": r["price"]} for r in list_ordered(conn)]
+
+
+def update(conn: sqlite3.Connection, rule_id: int, max_hops: int | None, price: float) -> bool:
+    cur = conn.execute(
+        "UPDATE fare_rules SET max_hops=?, price=? WHERE id=?", (max_hops, price, rule_id)
+    )
+    conn.commit()
+    return cur.rowcount > 0
